@@ -63,6 +63,60 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
    * TODO: Complete this function! Make sure you switch between lidar and radar
    * measurements.
    */
+  double px = 0, py = 0;
+  if (!this->is_initialized_) {
+    //cout << "Kalman Filter Initialization " << endl;
+
+    // set the state with the initial location and zero velocity (CTRV model -> 5 variables)
+    if ( meas_package.sensor_type_ == MeasurementPackage::LASER ) {
+      px = meas_package.raw_measurements_[0];
+      py = meas_package.raw_measurements_[1];
+    } else if ( meas_package.sensor_type_ == MeasurementPackage::RADAR ) {
+      px = meas_package.raw_measurements_[0] * cos(meas_package.raw_measurements_[1]);
+      py = meas_package.raw_measurements_[0] * sin(meas_package.raw_measurements_[1]);
+    }
+
+    this->x_ << px, py, 0, 0, 0;
+    this->P_ << 1, 0, 0, 0, 0,
+                0, 1, 0, 0, 0,
+                0, 0, 1, 0, 0,
+                0, 0, 0, 1, 0,
+                0, 0, 0, 0, 1;
+
+    this->time_us_ = meas_package.timestamp_;
+    is_initialized_ = true;
+    return;
+  }
+
+  // compute the time elapsed between the current and previous measurements
+  // dt - expressed in seconds
+  double dt = (meas_package.timestamp_ - this->time_us_) / 1000000.0;
+  this->time_us_ = meas_package.timestamp_;
+  
+  // 1. Modify the F matrix so that the time is integrated
+  this->F_(0, 2) = dt;
+  this->F_(1, 3) = dt;
+
+  // 2. Set the process covariance matrix Q
+  float dt_2 = dt * dt;
+  float dt_3 = dt_2 * dt;
+  float dt_4 = dt_3 * dt;
+
+  this->Q_ << dt_4 / 4 * noise_ax, 0, dt_3 / 2 * noise_ax, 0,
+            0, dt_4 / 4 * noise_ay, 0, dt_3 / 2 * noise_ay,
+            dt_3 / 2 * noise_ax, 0, dt_2 * noise_ax, 0,
+            0, dt_3 / 2 * noise_ay, 0, dt_2 * noise_ay;
+
+  // 3. Call the Kalman Filter predict() function
+  this->Prediction(dt);
+
+  // 4. Call the Kalman Filter update() function
+  //      with the most recent raw measurements_
+  if ( meas_package.sensor_type_ == MeasurementPackage::LASER ) {
+    this->UpdateLidar(meas_package);
+  } else if ( meas_package.sensor_type_ == MeasurementPackage::RADAR ) {
+    this->UpdateRadar(meas_package);
+  }
 }
 
 void UKF::Prediction(double delta_t) {
