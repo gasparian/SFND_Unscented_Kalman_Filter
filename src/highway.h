@@ -1,6 +1,7 @@
 /* \author Aaron Brown */
 // Handle logic for creating traffic on highway and animating it
 
+#include <iostream>
 #include "render/render.h"
 #include "sensors/lidar.h"
 #include "tools.h"
@@ -140,7 +141,8 @@ public:
     			double v2 = sin(yaw)*v;
 				estimate << traffic[i].ukf.x_[0], traffic[i].ukf.x_[1], v1, v2;
 				tools.estimations.push_back(estimate);
-	
+				// Show updated NIS
+			    // std::cout << "Car #" << i << "; Lidar NIS: " << traffic[i].ukf.NIS_lidar_ << "; Radar NIS: " << traffic[i].ukf.NIS_radar_ << std::endl;
 			}
 		}
 		viewer->addText("Accuracy - RMSE:", 30, 300, 20, 1, 1, 1, "rmse");

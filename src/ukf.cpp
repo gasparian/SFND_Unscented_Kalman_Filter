@@ -1,6 +1,8 @@
 #include <iostream>
+#include <stdexcept>
 #include "ukf.h"
 #include "Eigen/Dense"
+#include "Eigen/QR"
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -87,6 +89,9 @@ UKF::UKF() {
    */
   
   // std::cout << "Kalman Filter Initialization " << std::endl;
+
+  NIS_radar_ = 0.0;
+  NIS_lidar_ = 0.0;
 }
 
 UKF::~UKF() {}
@@ -105,9 +110,8 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
     if ( meas_package.sensor_type_ == MeasurementPackage::LASER ) {
       px = meas_package.raw_measurements_[0];
       py = meas_package.raw_measurements_[1];
-      init_var = std_laspx_;
 
-      std::cout << "Filter initialized with laser: " << px << ',' << py << ',' << init_var << std::endl;
+      std::cout << "Filter initialized with laser: " << px << ',' << py << ',' << std::endl;
 
     } else if ( meas_package.sensor_type_ == MeasurementPackage::RADAR ) {
       px = meas_package.raw_measurements_[0] * cos(meas_package.raw_measurements_[1]);
@@ -116,17 +120,16 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
                cos(meas_package.raw_measurements_[1]) * cos(meas_package.raw_measurements_[1]) +
                meas_package.raw_measurements_[2] * meas_package.raw_measurements_[2] *
                sin(meas_package.raw_measurements_[1]) * sin(meas_package.raw_measurements_[1]));
-      init_var = std_radr_;
 
-      std::cout << "Filter initialized with radar: " << px << ',' << py << ',' << v << ',' << init_var << std::endl;
+      std::cout << "Filter initialized with radar: " << px << ',' << py << ',' << v << ',' << std::endl;
     }
 
     this->x_ << px, py, v, phi, phi_;
-    this->P_ << init_var*.1, 0, 0, 0, 0,
-                0, init_var * .1, 0, 0, 0,
-                0, 0, std_radr_ * 2., 0, 0,
-                0, 0, 0, std_radr_ * 0.001, 0,
-                0, 0, 0, 0, std_radr_ * 0.001;
+    this->P_ << 1.0, 0, 0, 0, 0,
+                0, 1.0, 0, 0, 0,
+                0, 0, 1.0, 0, 0,
+                0, 0, 0, std_radphi_, 0,
+                0, 0, 0, 0, std_radphi_;
 
     this->time_us_ = meas_package.timestamp_;
     this->is_initialized_ = true;
@@ -284,11 +287,17 @@ void UKF::UpdateLidar(MeasurementPackage& meas_package) {
 
     Tc = Tc + this->weights_(i) * x_diff * z_diff.transpose();
   }
+
+  // MatrixXd S_inv = S.inverse();
+  VectorXd z_diff = meas_package.raw_measurements_ - z_pred;
   // calculate Kalman gain K;
   MatrixXd K = Tc * S.inverse();
   // update state mean and covariance matrix
-  this->x_ = this->x_ + K * (meas_package.raw_measurements_ - z_pred);
+  this->x_ = this->x_ + K * z_diff;
   this->P_ = this->P_ - K * S * K.transpose();
+
+  // calculate NIS
+  // this->NIS_lidar_ = z_diff.transpose() * S_inv * z_diff;
 }
 
 void UKF::UpdateRadar(MeasurementPackage& meas_package) {
@@ -313,7 +322,8 @@ void UKF::UpdateRadar(MeasurementPackage& meas_package) {
   for ( int i=0; i < 2 * this->n_aug_ + 1; i++ ) {
       Zsig(0, i) = sqrt(this->Xsig_pred_(0, i) * this->Xsig_pred_(0, i) + this->Xsig_pred_(1, i) * this->Xsig_pred_(1, i));
       Zsig(1, i) = atan2(this->Xsig_pred_(1, i), this->Xsig_pred_(0, i));
-      Zsig(2, i) = (this->Xsig_pred_(0, i) * cos(this->Xsig_pred_(3, i)) * this->Xsig_pred_(2, i) + this->Xsig_pred_(1, i) * sin(this->Xsig_pred_(3, i)) * this->Xsig_pred_(2, i)) / Zsig(0, i);
+      Zsig(2, i) = (this->Xsig_pred_(0, i) * cos(this->Xsig_pred_(3, i)) * this->Xsig_pred_(2, i) + this->Xsig_pred_(1, i) * sin(this->Xsig_pred_(3, i)) * this->Xsig_pred_(2, i))
+                    / std::max(0.001, Zsig(0, i));
   }
   // calculate mean predicted measurement
   for ( int i=0; i < 2*this->n_aug_+1; i++ ) {
@@ -356,6 +366,7 @@ void UKF::UpdateRadar(MeasurementPackage& meas_package) {
     Tc = Tc + this->weights_(i) * x_diff * z_diff.transpose();
   }
 
+  // MatrixXd S_inv = S.inverse();
   // calculate Kalman gain K;
   MatrixXd K = Tc * S.inverse();
   // residual
@@ -366,4 +377,7 @@ void UKF::UpdateRadar(MeasurementPackage& meas_package) {
   // update state mean and covariance matrix
   this->x_ = this->x_ + K * z_diff;
   this->P_ = this->P_ - K * S * K.transpose();
+
+  // calculate NIS
+  // this->NIS_radar_ = z_diff.transpose() * S_inv * z_diff;
 }
